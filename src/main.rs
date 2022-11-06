@@ -151,7 +151,7 @@ fn main() {
                 std::process::exit(1);
 			};
 
-            let path_and_ext = file_name_and_ext_from_string(path);
+            let path_and_ext = file_name_and_ext_from_string(path.clone());
 			let file_name = path_and_ext.0;
 			let file_ext = path_and_ext.1;
 
@@ -162,7 +162,7 @@ fn main() {
                 std::process::exit(1);
 			};
 
-			if fs.add_file(File::new(file_name, file_ext, file_content)).is_ok() {
+			if fs.add_file(File::new(file_name.clone(), file_ext.clone(), file_content)).is_ok() {
 				println!("added {}.{} to the vault", file_name, file_ext);
 			} else {
 				println!("file already exists");
