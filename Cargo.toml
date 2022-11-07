@@ -1,8 +1,9 @@
 [package]
 name = "vault"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
 serde = { version = "1.0.147", features = ["derive"] }
 rmp-serde = "1.1.1"
+indoc = "1.0.7"
