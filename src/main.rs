@@ -3,7 +3,7 @@ use std::{
 	path::{Path, PathBuf}
 };
 
-use indoc::printdoc;
+use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -167,161 +167,101 @@ fn get_files_from_dir(dir: PathBuf) -> std::io::Result<Vec<DirEntry>> {
 	Ok(files)
 }
 
+#[derive(Parser, Debug)]
+#[command(author, version)]
+struct Cli {
+	#[command(subcommand)]
+	command: Commands
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+	Add {
+		files: Vec<PathBuf>,
+		// #[arg(short, long)]
+		// force: bool
+	},
+	Ls,
+	Init {
+		#[arg(short, long)]
+		force: bool,
+		#[arg(short, long)]
+		empty: bool
+	},
+	Export {
+		files: Vec<String>
+	},
+	Cat {
+		file: String
+	},
+	Rm {
+		files: Vec<String>
+	}
+}
+
 fn main() {
-	let command = if let Some(c) = std::env::args().nth(1) {
-		c
-	} else {
-		println!("no command provided");
-		std::process::exit(1);
-	};
+	let cli = Cli::parse();
 
-	match command.as_str() {
-		"add" => {
-			let force = std::env::args()
-				.find(|arg| arg == &String::from("-f") || arg == &String::from("--force"))
-				.is_some();
+	match &cli.command {
+		Commands::Add { files/*, force*/ } => {
+			let paths = files.clone();
+			let mut files: Vec<PathBuf> = Vec::new();
+
+			for path in paths.into_iter() {
+				if path.is_file() {
+					files.push(path);
+				} else if path.is_dir() {
+					let entries = get_files_from_dir(path).unwrap_or_else(|_| {
+						println!("unknown error");
+						std::process::exit(1)
+					});
+
+					let mut entries: Vec<PathBuf> = entries.iter().map(|entry| entry.path()).collect();
+					// TODO: support files without file extensions, for now just ignore them
+					entries.retain(|entry| entry.extension().is_some());
+
+					files.append(&mut entries);
+				}
+			}
+
 			let mut fs = get_fs_or_exit();
-			let path = if let Some(p) = std::env::args().nth(2) {
-				p
-			} else {
-				println!("no file path");
-				std::process::exit(1);
-			};
 
-			let path_buf = PathBuf::from(path);
-
-			fn add_file(path: String, fs: &mut FileSystem, force: bool) {
-				let path_and_ext = file_name_and_ext_from_string(path.clone());
+			for file in files.iter() {
+				let path_and_ext = file_name_and_ext_from_string(file.to_string_lossy().into());
 				let file_name = path_and_ext.0;
 				let file_ext = path_and_ext.1;
 
-				let file_content = if let Ok(content) = fs::read(path) {
+				let file_content = if let Ok(content) = fs::read(file) {
 					content
 				} else {
-					println!("error reading file");
-					std::process::exit(1);
+					println!("error reading file {}.{}, skipping...", file_name, file_ext);
+					continue;
 				};
 
 				if fs
 					.add_file(
 						File::new(file_name.clone(), file_ext.clone(), file_content),
-						force
+						// TODO WHICH IS VERY VERY IMPORTANT: FIX FORCE ADDING FILES
+						false
 					)
 					.is_ok()
 				{
-					if force {
-						println!("got -f or --force, overwriting existing file");
-					}
+					// if *force {
+					// 	println!("got -f or --force, overwriting existing file");
+					// }
 					println!("added {}.{} to the vault", file_name, file_ext);
 				} else {
 					println!(
-						"file already exists\nif you want to overwrite the file, use -f or --force"
+						"file {}.{} already exists\nif you want to overwrite the file, use -f or --force",
+						file_name,
+						file_ext
 					);
-					std::process::exit(1);
 				}
-			}
-
-			if path_buf.is_file() {
-				add_file(path_buf.to_string_lossy().into(), &mut fs, force);
-			} else if path_buf.is_dir() {
-				let files = if let Ok(f) = get_files_from_dir(path_buf) {
-					f
-				} else {
-					println!("unknown error");
-					std::process::exit(1);
-				};
-
-				for file in files {
-					add_file(file.path().to_string_lossy().into(), &mut fs, force);
-				}
-			} else {
-				println!("path is not a file or directory");
-				std::process::exit(1);
 			}
 
 			save_fs(&fs);
 		},
-		"export" => {
-			let fs = get_fs_or_exit();
-			let path = if let Some(p) = std::env::args().nth(2) {
-				p
-			} else {
-				println!("no file path");
-				std::process::exit(1);
-			};
-
-			let path_and_ext = file_name_and_ext_from_string(path);
-			let file_name = path_and_ext.0;
-			let file_ext = path_and_ext.1;
-
-			let read_file = if let Ok(f) = fs.get_file(&file_name, &file_ext) {
-				f
-			} else {
-				println!("file does not exist inside vault");
-				std::process::exit(1);
-			};
-
-			if fs::write(
-				format!("vault-{}.{}", read_file.name, read_file.extension),
-				read_file.content.clone()
-			)
-			.is_ok()
-			{
-				println!(
-					"exported {}.{} to ./vault-{}.{}",
-					read_file.name, read_file.extension, read_file.name, read_file.extension
-				);
-			} else {
-				println!("error writing");
-				std::process::exit(1);
-			}
-		},
-		"cat" => {
-			let fs = get_fs_or_exit();
-			let path = if let Some(p) = std::env::args().nth(2) {
-				p
-			} else {
-				println!("no file path");
-				std::process::exit(1);
-			};
-
-			let path_and_ext = file_name_and_ext_from_string(path);
-			let file_name = path_and_ext.0;
-			let file_ext = path_and_ext.1;
-
-			let read_file = if let Ok(f) = fs.get_file(&file_name, &file_ext) {
-				f
-			} else {
-				println!("file does not exist inside vault");
-				std::process::exit(1);
-			};
-
-			println!("{}.{}:", read_file.name, read_file.extension);
-			println!("{}", String::from_utf8_lossy(read_file.content.as_slice()));
-		},
-		"rm" => {
-			let mut fs = get_fs_or_exit();
-			let path = if let Some(p) = std::env::args().nth(2) {
-				p
-			} else {
-				println!("no file path");
-				std::process::exit(1);
-			};
-
-			let path_and_ext = file_name_and_ext_from_string(path);
-			let file_name = path_and_ext.0;
-			let file_ext = path_and_ext.1;
-
-			if fs.delete_file(&file_name, &file_ext).is_err() {
-				println!("file does not exist inside vault");
-				std::process::exit(1);
-			}
-
-			save_fs(&fs);
-
-			println!("deleted file");
-		},
-		"ls" => {
+		Commands::Ls => {
 			let fs = get_fs_or_exit();
 
 			let files: Vec<String> = fs.files.iter().map(|file| file.display()).collect();
@@ -333,26 +273,19 @@ fn main() {
 				files.join("\n")
 			);
 		},
-		"init" => {
-			let empty = std::env::args()
-				.find(|arg| arg == &String::from("-e") || arg == &String::from("--empty"))
-				.is_some();
-			let force = std::env::args()
-				.find(|arg| arg == &String::from("-f") || arg == &String::from("--force"))
-				.is_some();
-
-			if Path::new("vault.vault").exists() && !force {
+		Commands::Init { force, empty } => {
+			if Path::new("vault.vault").exists() && !*force {
 				println!("vault already exists in current directory\nif you want to overwrite the current vault, use -f or --force");
 				std::process::exit(1);
 			} else {
-				if force {
+				if *force {
 					println!("got -f or --force, overwriting current vault");
 				}
-				if empty {
+				if *empty {
 					println!("got -e or --empty, creating empty vault");
 				}
 				let mut fs = FileSystem::new();
-				if !empty {
+				if !*empty {
 					fs.add_file(
 						File::new("hello".into(),
 						"txt".into(),
@@ -364,32 +297,69 @@ fn main() {
 				println!("created a new vault in current directory");
 			}
 		},
-		"help" => {
-			printdoc! {
-				"
-				vault v{version}
+		Commands::Export { files } => {
+			let fs = get_fs_or_exit();
 
-				usage
-				vault [command] <arguments>
-
-				commands
-				   add <file path> - adds a file to the vault
-				       -f, --force - overwrite existing file (if any)
-				export <file name> - exports a file from the vault
-				   cat <file name> - prints contents of a file in the vault
-				    rm <file name> - deletes a file from the vault
-				    ls             - lists all files in the vault
-				  init             - creates a vault in the current directory
-				      -e, --empty  - create an empty vault
-				      -f, --force  - overwrite existing vault (if any)
-				  help             - prints available commands
-				",
-				version = env!("CARGO_PKG_VERSION")
+			for file in files.iter() {
+				let path_and_ext = file_name_and_ext_from_string(file.clone());
+				let file_name = path_and_ext.0;
+				let file_ext = path_and_ext.1;
+	
+				let read_file = if let Ok(f) = fs.get_file(&file_name, &file_ext) {
+					f
+				} else {
+					println!("file {}.{} does not exist inside vault", &file_name, &file_ext);
+					continue;
+				};
+	
+				if fs::write(
+					format!("vault-{}.{}", read_file.name, read_file.extension),
+					read_file.content.clone()
+				)
+				.is_ok()
+				{
+					println!(
+						"exported {}.{} to ./vault-{}.{}",
+						read_file.name, read_file.extension, read_file.name, read_file.extension
+					);
+				} else {
+					println!("error writing exported file, skipping...");
+				}
 			}
 		},
-		_ => {
-			println!("invalid command");
-			std::process::exit(1);
+		Commands::Cat { file } => {
+			let fs = get_fs_or_exit();
+
+			let path_and_ext = file_name_and_ext_from_string(file.clone());
+			let file_name = path_and_ext.0;
+			let file_ext = path_and_ext.1;
+
+			let read_file = if let Ok(f) = fs.get_file(&file_name, &file_ext) {
+				f
+			} else {
+				println!("file {}.{} does not exist inside vault", file_name, file_ext);
+				std::process::exit(1);
+			};
+
+			println!("{}.{}:", read_file.name, read_file.extension);
+			println!("{}", String::from_utf8_lossy(read_file.content.as_slice()));
+		},
+		Commands::Rm { files } => {
+			let mut fs = get_fs_or_exit();
+
+			for file in files.iter() {
+				let path_and_ext = file_name_and_ext_from_string(file.clone());
+				let file_name = path_and_ext.0;
+				let file_ext = path_and_ext.1;
+	
+				if fs.delete_file(&file_name, &file_ext).is_err() {
+					println!("file {}.{} does not exist inside vault", file_name, file_ext);
+				} else {
+					println!("deleted file {}.{} from vault", file_name, file_ext);
+				}
+			}
+
+			save_fs(&fs);
 		}
 	}
 }
