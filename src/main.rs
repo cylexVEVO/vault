@@ -176,25 +176,37 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+	/// Adds file(s) to the vault
 	Add {
+		/// File(s) to add
 		files: Vec<PathBuf>,
 		// #[arg(short, long)]
 		// force: bool
 	},
+	/// Lists all files in the vault
 	Ls,
+	/// Creates a new vault in the current directory
 	Init {
+		/// Overwrite existing vault (if any)
 		#[arg(short, long)]
 		force: bool,
+		/// Create an empty vault
 		#[arg(short, long)]
 		empty: bool
 	},
+	/// Exports file(s) from the vault
 	Export {
+		/// File(s) to export
 		files: Vec<String>
 	},
+	/// Prints the content of a file in the vault
 	Cat {
+		/// File to print
 		file: String
 	},
+	/// Removes file(s) from the vault
 	Rm {
+		/// File(s) to remove
 		files: Vec<String>
 	}
 }
